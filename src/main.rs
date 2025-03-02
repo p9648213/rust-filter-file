@@ -1,3 +1,5 @@
+use regex::Regex;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 
@@ -9,51 +11,64 @@ fn main() {
     let paths = fs::read_dir(dir).unwrap();
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
 
+    let version_regex = Regex::new(r"_([0-9A-Z]+)_").unwrap();
+
+    // Step 1: Group files by their common identifier
     for path in paths {
         let path = path.unwrap();
         if path.file_type().unwrap().is_file() {
             let file_name = path.file_name().into_string().unwrap();
-            if let Some((group, version)) = extract_group_version(&file_name) {
-                groups.entry(group).or_insert_with(Vec::new).push(version);
+            if let Some((group, _)) = extract_group_version(&file_name, &version_regex) {
+                groups.entry(group).or_insert_with(Vec::new).push(file_name);
             }
         }
     }
 
-    for (group, mut versions) in groups {
-        versions.sort_by(|a, b| compare_versions(a, b));
+    // Step 2: Determine the newest file for each group
+    for (_, mut files) in groups {
+        files.sort_by(|a, b| compare_versions(a, b, &version_regex));
 
-        for version in versions.iter().take(versions.len() - 1) {
-            let old_file = format!(
-                "{}/{}_{}_Datasheet for Onshore Pipeline Valve.xls",
-                dir, group, version
-            );
-            let new_path = format!(
-                "{}/{}_{}_Datasheet for Onshore Pipeline Valve.xls",
-                old_dir, group, version
-            );
-            fs::rename(&old_file, &new_path).unwrap();
+        files.pop().unwrap(); // The last file is the newest
+
+        // Move old files to the OLD folder
+        for file in files {
+            let old_path = format!("{}/{}", dir, file);
+            let new_path = format!("{}/{}", old_dir, file);
+            fs::rename(&old_path, &new_path).unwrap();
         }
     }
 }
 
-fn extract_group_version(file_name: &str) -> Option<(String, String)> {
-    let parts: Vec<&str> = file_name.split('_').collect();
-    if parts.len() < 3 {
-        return None;
+// Extract group and version from filename
+fn extract_group_version(file_name: &str, regex: &Regex) -> Option<(String, String)> {
+    if let Some(captures) = regex.captures(file_name) {
+        let version = captures.get(1).unwrap().as_str().to_string();
+        let group = file_name.replacen(&format!("_{}_", version), "_", 1);
+        Some((group, version))
+    } else {
+        None
     }
-    let group = parts[0].to_string();
-    let version = parts[1].to_string();
-    Some((group, version))
 }
 
-fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
-    let a_is_number = a.chars().all(char::is_numeric);
-    let b_is_number = b.chars().all(char::is_numeric);
+// Compare versions correctly (Numbers > Letters)
+fn compare_versions(a: &str, b: &str, regex: &Regex) -> Ordering {
+    let (group_a, version_a) = extract_group_version(a, regex).unwrap();
+    let (group_b, version_b) = extract_group_version(b, regex).unwrap();
+
+    if group_a != group_b {
+        return group_a.cmp(&group_b);
+    }
+
+    let a_is_number = version_a.chars().all(char::is_numeric);
+    let b_is_number = version_b.chars().all(char::is_numeric);
 
     match (a_is_number, b_is_number) {
-        (true, true) => a.parse::<i32>().unwrap().cmp(&b.parse::<i32>().unwrap()),
-        (true, false) => std::cmp::Ordering::Greater,
-        (false, true) => std::cmp::Ordering::Less,
-        (false, false) => a.cmp(b),
+        (true, true) => version_a
+            .parse::<i32>()
+            .unwrap()
+            .cmp(&version_b.parse::<i32>().unwrap()), // Compare numbers
+        (true, false) => Ordering::Greater, // Numbers are newer than letters
+        (false, true) => Ordering::Less,
+        (false, false) => version_a.cmp(&version_b), // Compare letters alphabetically
     }
 }
