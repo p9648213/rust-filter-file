@@ -13,7 +13,7 @@ fn main() {
 
     let version_regex = Regex::new(r"_([0-9A-Z]+)_").unwrap();
 
-    // Step 1: Group files by their common identifier
+    // Step 1: Group files by their base identifier
     for path in paths {
         let path = path.unwrap();
         if path.file_type().unwrap().is_file() {
@@ -24,26 +24,32 @@ fn main() {
         }
     }
 
-    // Step 2: Determine the newest file for each group
+    // Step 2: Keep only the newest file for each group
     for (_, mut files) in groups {
         files.sort_by(|a, b| compare_versions(a, b, &version_regex));
 
-        files.pop().unwrap(); // The last file is the newest
+        let newest_file = files.pop().unwrap(); // The last file is the newest
 
-        // Move old files to the OLD folder
+        // Move old files to OLD folder
         for file in files {
             let old_path = format!("{}/{}", dir, file);
             let new_path = format!("{}/{}", old_dir, file);
             fs::rename(&old_path, &new_path).unwrap();
         }
+
+        println!("Keeping: {}", newest_file);
     }
 }
 
-// Extract group and version from filename
+// Extract group identifier and version
 fn extract_group_version(file_name: &str, regex: &Regex) -> Option<(String, String)> {
     if let Some(captures) = regex.captures(file_name) {
         let version = captures.get(1).unwrap().as_str().to_string();
-        let group = file_name.replacen(&format!("_{}_", version), "_", 1);
+
+        // Find the position of the first version match in the filename
+        let version_start = captures.get(1).unwrap().start();
+        let group = file_name[..version_start - 1].to_string(); // Everything before `_X_`
+
         Some((group, version))
     } else {
         None
