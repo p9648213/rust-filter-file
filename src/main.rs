@@ -11,7 +11,8 @@ fn main() {
     let paths = fs::read_dir(dir).unwrap();
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
 
-    let version_regex = Regex::new(r"_([0-9A-Z]+)_").unwrap();
+    // Updated regex: captures _A_, _rev.A_, _sub.A_, etc., but only extracts the 'A'
+    let version_regex = Regex::new(r"_(?:[a-zA-Z]+\.)?([0-9A-Z])_").unwrap();
 
     // Step 1: Group files by their base identifier
     for path in paths {
@@ -19,7 +20,7 @@ fn main() {
         if path.file_type().unwrap().is_file() {
             let file_name = path.file_name().into_string().unwrap();
             if let Some((group, _)) = extract_group_version(&file_name, &version_regex) {
-                groups.entry(group).or_insert_with(Vec::new).push(file_name);
+                groups.entry(group).or_default().push(file_name);
             }
         }
     }
@@ -45,12 +46,15 @@ fn main() {
 fn extract_group_version(file_name: &str, regex: &Regex) -> Option<(String, String)> {
     if let Some(captures) = regex.captures(file_name) {
         let version = captures.get(1).unwrap().as_str().to_string();
+        let _match_start = captures.get(1).unwrap().start();
 
-        // Find the position of the first version match in the filename
-        let version_start = captures.get(1).unwrap().start();
-        let group = file_name[..version_start - 1].to_string(); // Everything before `_X_`
-
-        Some((group, version))
+        // Go back to find the underscore before the whole match (to slice the group cleanly)
+        if let Some(m) = regex.find(file_name) {
+            let group = file_name[..m.start()].to_string();
+            Some((group, version))
+        } else {
+            None
+        }
     } else {
         None
     }
